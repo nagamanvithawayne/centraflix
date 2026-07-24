@@ -1,0 +1,597 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model Role {
+  id          Int          @id @default(autoincrement())
+  name        String       @unique
+  label       String
+  permissions Permission[]
+  users       User[]
+  createdAt   DateTime     @default(now())
+  @@map("roles")
+}
+
+model Permission {
+  id         Int     @id @default(autoincrement())
+  roleId     Int
+  module     String
+  canView    Boolean @default(false)
+  canCreate  Boolean @default(false)
+  canEdit    Boolean @default(false)
+  canDelete  Boolean @default(false)
+  canExport  Boolean @default(false)
+  canApprove Boolean @default(false)
+  role       Role    @relation(fields: [roleId], references: [id], onDelete: Cascade)
+  @@unique([roleId, module])
+  @@map("permissions")
+}
+
+model Department {
+  id             Int            @id @default(autoincrement())
+  name           String         @unique
+  code           String         @unique
+  description    String?
+  isActive       Boolean        @default(true)
+  createdAt      DateTime       @default(now())
+  employees      Employee[]
+  machines       Machine[]
+  deviations     Deviation[]
+  processEntries ProcessEntry[]
+  @@map("departments")
+}
+
+model User {
+  id                 Int                @id @default(autoincrement())
+  uuid               String             @unique @default(uuid())
+  username           String             @unique
+  email              String             @unique
+  passwordHash       String
+  roleId             Int
+  employeeId         Int?               @unique
+  isActive           Boolean            @default(true)
+  lastLoginAt        DateTime?
+  lastLoginIp        String?
+  createdAt          DateTime           @default(now())
+  updatedAt          DateTime           @updatedAt
+  role               Role               @relation(fields: [roleId], references: [id])
+  employee           Employee?          @relation(fields: [employeeId], references: [id])
+  sessions           Session[]
+  auditLogs          AuditLog[]
+  processEntries     ProcessEntry[]
+  deviationsLogged   Deviation[]        @relation("ReportedBy")
+  deviationsReviewed Deviation[]        @relation("ReviewedBy")
+  machineStatusLogs  MachineStatusLog[]
+  comments           Comment[]
+  approvals          Approval[]
+  trainingGiven      TrainingRecord[]   @relation("TrainedBy")
+  @@map("users")
+}
+
+model Session {
+  id        Int      @id @default(autoincrement())
+  userId    Int
+  token     String   @unique
+  ipAddress String?
+  userAgent String?
+  expiresAt DateTime
+  isRevoked Boolean  @default(false)
+  createdAt DateTime @default(now())
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  @@map("sessions")
+}
+
+model Employee {
+  id                 Int              @id @default(autoincrement())
+  employeeCode       String           @unique
+  fullName           String
+  email              String           @unique
+  phone              String?
+  departmentId       Int
+  badgeNumber        String?          @unique
+  reportingManagerId Int?
+  joiningDate        DateTime
+  shift              String           @default("Day")
+  isActive           Boolean          @default(true)
+  notes              String?
+  createdAt          DateTime         @default(now())
+  updatedAt          DateTime         @updatedAt
+  department         Department       @relation(fields: [departmentId], references: [id])
+  reportingManager   Employee?        @relation("Reports", fields: [reportingManagerId], references: [id])
+  subordinates       Employee[]       @relation("Reports")
+  user               User?
+  trainingRecords    TrainingRecord[]
+  assignedEntries    ProcessEntry[]   @relation("AssignedTo")
+  @@map("employees")
+}
+
+model ProcessType {
+  id             Int              @id @default(autoincrement())
+  name           String           @unique
+  code           String           @unique
+  description    String?
+  sequence       Int              @default(0)
+  departmentCode String?
+  isActive       Boolean          @default(true)
+  createdAt      DateTime         @default(now())
+  subTypes       ProcessSubType[]
+  trainingRecords TrainingRecord[]
+  processEntries ProcessEntry[]
+  deviations     Deviation[]
+  workflowStages WorkflowStage[]
+  @@map("process_types")
+}
+
+model ProcessSubType {
+  id            Int            @id @default(autoincrement())
+  processTypeId Int
+  name          String
+  code          String
+  description   String?
+  isActive      Boolean        @default(true)
+  processType   ProcessType    @relation(fields: [processTypeId], references: [id], onDelete: Cascade)
+  processEntries ProcessEntry[]
+  deviations    Deviation[]
+  @@unique([processTypeId, code])
+  @@map("process_sub_types")
+}
+
+model TrainingRecord {
+  id            Int            @id @default(autoincrement())
+  employeeId    Int
+  processTypeId Int
+  status        TrainingStatus @default(PENDING)
+  certifiedDate DateTime?
+  expiryDate    DateTime?
+  trainedById   Int?
+  score         Float?
+  notes         String?
+  createdAt     DateTime       @default(now())
+  updatedAt     DateTime       @updatedAt
+  employee      Employee       @relation(fields: [employeeId], references: [id], onDelete: Cascade)
+  processType   ProcessType    @relation(fields: [processTypeId], references: [id])
+  trainedBy     User?          @relation("TrainedBy", fields: [trainedById], references: [id])
+  @@unique([employeeId, processTypeId])
+  @@map("training_records")
+}
+
+enum TrainingStatus {
+  PENDING
+  IN_PROGRESS
+  CERTIFIED
+  EXPIRED
+  WAIVED
+}
+
+model WorkflowStage {
+  id            Int            @id @default(autoincrement())
+  processTypeId Int
+  name          String
+  sequence      Int
+  department    String
+  isRequired    Boolean        @default(true)
+  canSkip       Boolean        @default(false)
+  skipRoles     String?
+  description   String?
+  processType   ProcessType    @relation(fields: [processTypeId], references: [id])
+  processEntries ProcessEntry[]
+  @@unique([processTypeId, sequence])
+  @@map("workflow_stages")
+}
+
+model TrayBatch {
+  id             Int            @id @default(autoincrement())
+  trayCode       String         @unique
+  batchNumber    String         @unique
+  productName    String
+  quantity       Int
+  unitOfMeasure  String         @default("units")
+  currentStage   Int            @default(1)
+  status         TrayStatus     @default(ACTIVE)
+  assignedUserId Int?
+  cleanroomRoute String?
+  startedAt      DateTime       @default(now())
+  completedAt    DateTime?
+  notes          String?
+  createdAt      DateTime       @default(now())
+  updatedAt      DateTime       @updatedAt
+  processEntries ProcessEntry[]
+  deviations     Deviation[]
+  comments       Comment[]
+  @@map("trays_batches")
+}
+
+enum TrayStatus {
+  ACTIVE
+  ON_HOLD
+  REWORK
+  REJECTED
+  COMPLETE
+  SHIPPED
+}
+
+model ProcessEntry {
+  id               Int             @id @default(autoincrement())
+  trayBatchId      Int
+  workflowStageId  Int?
+  processTypeId    Int
+  processSubTypeId Int?
+  departmentId     Int?
+  machineId        Int?
+  performedById    Int
+  assignedEmpId    Int?
+  status           EntryStatus     @default(IN_PROGRESS)
+  startedAt        DateTime        @default(now())
+  completedAt      DateTime?
+  comments         String?
+  parameters       Json?
+  createdAt        DateTime        @default(now())
+  updatedAt        DateTime        @updatedAt
+  trayBatch        TrayBatch       @relation(fields: [trayBatchId], references: [id])
+  workflowStage    WorkflowStage?  @relation(fields: [workflowStageId], references: [id])
+  processType      ProcessType     @relation(fields: [processTypeId], references: [id])
+  processSubType   ProcessSubType? @relation(fields: [processSubTypeId], references: [id])
+  department       Department?     @relation(fields: [departmentId], references: [id])
+  machine          Machine?        @relation(fields: [machineId], references: [id])
+  performedBy      User            @relation(fields: [performedById], references: [id])
+  assignedEmp      Employee?       @relation("AssignedTo", fields: [assignedEmpId], references: [id])
+  @@map("process_entries")
+}
+
+enum EntryStatus {
+  IN_PROGRESS
+  COMPLETED
+  FAILED
+  ON_HOLD
+  SKIPPED
+}
+
+model Machine {
+  id           Int                @id @default(autoincrement())
+  machineCode  String             @unique
+  code         String             @unique
+  name         String
+  departmentId Int
+  status       MachineStatus      @default(NORMAL)
+  isActive     Boolean            @default(true)
+  serialNumber String?
+  model        String?
+  manufacturer String?
+  notes        String?
+  createdAt    DateTime           @default(now())
+  updatedAt    DateTime           @updatedAt
+  department   Department         @relation(fields: [departmentId], references: [id])
+  statusLogs   MachineStatusLog[]
+  processEntries ProcessEntry[]
+  deviations   Deviation[]
+  @@map("machines")
+}
+
+model MachineStatusLog {
+  id          Int           @id @default(autoincrement())
+  machineId   Int
+  oldStatus   MachineStatus
+  newStatus   MachineStatus
+  updatedById Int
+  remarks     String?
+  isDowntime  Boolean       @default(false)
+  createdAt   DateTime      @default(now())
+  machine     Machine       @relation(fields: [machineId], references: [id])
+  updatedBy   User          @relation(fields: [updatedById], references: [id])
+  @@map("machine_status_logs")
+}
+
+enum MachineStatus {
+  NORMAL
+  NCR
+  SPECIAL_PURPOSE
+  OFFLINE
+  MAINTENANCE
+}
+
+model Deviation {
+  id               Int              @id @default(autoincrement())
+  deviationCode    String           @unique
+  ncrNumber        String?
+  departmentId     Int
+  processTypeId    Int?
+  processSubTypeId Int?
+  trayBatchId      Int?
+  machineId        Int?
+  reportedById     Int
+  reviewedById     Int?
+  issueCategory    String
+  severity         DevSeverity
+  description      String
+  immediateAction  String?
+  rootCause        String?
+  correctiveAction String?
+  status           DevStatus        @default(OPEN)
+  qaComment        String?
+  shareableRef     String           @unique @default(uuid())
+  reportedAt       DateTime         @default(now())
+  reviewedAt       DateTime?
+  closedAt         DateTime?
+  createdAt        DateTime         @default(now())
+  updatedAt        DateTime         @updatedAt
+  department       Department       @relation(fields: [departmentId], references: [id])
+  processType      ProcessType?     @relation(fields: [processTypeId], references: [id])
+  processSubType   ProcessSubType?  @relation(fields: [processSubTypeId], references: [id])
+  trayBatch        TrayBatch?       @relation(fields: [trayBatchId], references: [id])
+  machine          Machine?         @relation(fields: [machineId], references: [id])
+  reportedBy       User             @relation("ReportedBy", fields: [reportedById], references: [id])
+  reviewedBy       User?            @relation("ReviewedBy", fields: [reviewedById], references: [id])
+  media            DeviationMedia[]
+  comments         Comment[]
+  approvals        Approval[]
+  @@map("deviations")
+}
+
+model DeviationMedia {
+  id          Int       @id @default(autoincrement())
+  deviationId Int
+  fileType    String
+  fileName    String
+  filePath    String
+  fileSize    Int?
+  mimeType    String?
+  uploadedAt  DateTime  @default(now())
+  deviation   Deviation @relation(fields: [deviationId], references: [id], onDelete: Cascade)
+  @@map("deviation_media")
+}
+
+enum DevSeverity {
+  LOW
+  MEDIUM
+  HIGH
+  CRITICAL
+}
+
+enum DevStatus {
+  OPEN
+  UNDER_REVIEW
+  QA_REVIEW_PENDING
+  APPROVED
+  REJECTED
+  CLOSED
+}
+
+model Comment {
+  id          Int        @id @default(autoincrement())
+  userId      Int
+  module      String
+  trayBatchId Int?
+  deviationId Int?
+  content     String
+  isInternal  Boolean    @default(false)
+  createdAt   DateTime   @default(now())
+  updatedAt   DateTime   @updatedAt
+  user        User       @relation(fields: [userId], references: [id])
+  trayBatch   TrayBatch? @relation(fields: [trayBatchId], references: [id])
+  deviation   Deviation? @relation(fields: [deviationId], references: [id])
+  @@map("comments")
+}
+model Approval {
+  id        Int            @id @default(autoincrement())
+  userId    Int
+  module    String
+  recordId  Int
+  action    ApprovalAction
+  remarks   String?
+  createdAt DateTime       @default(now())
+  user      User           @relation(fields: [userId], references: [id])
+  deviation Deviation?     @relation(fields: [recordId], references: [id], map: "approval_dev_fk")
+  @@map("approvals")
+}
+
+enum ApprovalAction {
+  APPROVED
+  REJECTED
+  RETURNED
+  ESCALATED
+}
+
+model AuditLog {
+  id        Int      @id @default(autoincrement())
+  userId    Int
+  action    String
+  module    String
+  recordId  String?
+  oldValue  Json?
+  newValue  Json?
+  ipAddress String?
+  userAgent String?
+  createdAt DateTime @default(now())
+  user      User     @relation(fields: [userId], references: [id])
+  @@index([userId])
+  @@index([module])
+  @@index([createdAt])
+  @@map("audit_logs")
+}
+
+model ReportMeta {
+  id            Int      @id @default(autoincrement())
+  generatedById Int
+  reportType    String
+  filters       Json?
+  format        String
+  filePath      String?
+  rowCount      Int?
+  createdAt     DateTime @default(now())
+  @@map("reports_metadata")
+}
+// ADD THIS TO YOUR EXISTING schema.prisma file
+// Location: C:\centtralix\backend\prisma\schema.prisma
+
+model OrderRecord {
+  id                              Int       @id @default(autoincrement())
+  
+  // Core Identity
+  status                          String?   @default("Open Order")
+  customer                        String?
+  agreementNumber                 String?   @map("agreement_number")
+  poNumber                        String?   @map("po_number")
+  releaseNumber                   String?   @map("release_number")
+  lotNumber                       String?   @map("lot_number")
+  ncr                             Boolean?  @default(false)
+  sgsPONumber                     String?   @map("sgs_po_number")
+  productDescription              String?   @map("product_description")
+  comments                        String?
+  partNumber                      String?   @map("part_number")
+  fgNumber                        String?   @map("fg_number")
+  process                         String?
+  requiredBioTests                String?   @map("required_bio_tests")
+
+  // Customer Supplied Ware
+  dateAgreementPORcvd             DateTime? @map("date_agreement_po_rcvd")
+  customerSuppliedWare            String?   @map("customer_supplied_ware")
+  qtyRcvdCSWare                   Int?      @map("qty_rcvd_cs_ware")
+  dateCSWareReceived              DateTime? @map("date_cs_ware_received")
+  dateCSReceivingDocsSubmitted    DateTime? @map("date_cs_receiving_docs_submitted")
+  dateCSDocumentsSavedToServer    DateTime? @map("date_cs_documents_saved_to_server")
+  dateDACAssigned                 DateTime? @map("date_dac_assigned")
+
+  // Work Order Dates
+  dateWOCreatedQA                 DateTime? @map("date_wo_created_qa")
+  dateWOApproved                  DateTime? @map("date_wo_approved")
+  dateMaterialPulled              DateTime? @map("date_material_pulled")
+  expectedStartWeek               String?   @map("expected_start_week")
+  startDate                       DateTime? @map("start_date")
+  startedDateMMYY                 String?   @map("started_date_mm_yy")
+
+  // Bio Testing
+  actualBioShipDate               DateTime? @map("actual_bio_ship_date")
+  allResultsReceived              Boolean?  @map("all_results_received")
+  dateBFSTestReportsRcvd          DateTime? @map("date_bfs_test_reports_rcvd")
+  dateDTSTestReportsRcvd          DateTime? @map("date_dts_test_reports_rcvd")
+  dateLALVALTestReportsRcvd       DateTime? @map("date_lalval_test_reports_rcvd")
+  dateRLALTestReportsRcvd         DateTime? @map("date_rlal_test_reports_rcvd")
+
+  // Completion & QA
+  completionDate                  DateTime? @map("completion_date")
+  completionDateBoxed             DateTime? @map("completion_date_boxed")
+  reconciledDateMMYY              String?   @map("reconciled_date_mm_yy")
+  dateWOSubmittedToQA             DateTime? @map("date_wo_submitted_to_qa")
+  reviewedDateMMYY                String?   @map("reviewed_date_mm_yy")
+  dateWOSubmittedToProduction     DateTime? @map("date_wo_submitted_to_production")
+  quarantineWaiverCreated         DateTime? @map("quarantine_waiver_created")
+
+  // Certification
+  typeOfCertRequired              String?   @map("type_of_cert_required")
+  totalOrderYield                 Int?      @map("total_order_yield")
+  processedYieldDifferencePct     Float?    @map("processed_yield_difference_pct")
+  dateRequestForCertSent          DateTime? @map("date_request_for_cert_sent")
+  dateCertCreated                 DateTime? @map("date_cert_created")
+  certReviewedAndApproved         DateTime? @map("cert_reviewed_and_approved")
+
+  // Shipping & Quarantine
+  quantityShippedSoFar            Int?      @map("quantity_shipped_so_far")
+  quarantine                      Boolean?  @default(false)
+  quantityParticulateSamples      Int?      @map("quantity_particulate_samples")
+  dateParticulateSamplesCollected DateTime? @map("date_particulate_samples_collected")
+  quantitySGSSamples              Int?      @map("quantity_sgs_samples")
+  dateSGSSamplesCollected         DateTime? @map("date_sgs_samples_collected")
+
+  // Quantities
+  orderQuantityEaches             Int?      @map("order_quantity_eaches")
+  orderQuantityTraysBags          Float?    @map("order_quantity_trays_bags")
+  quantityPerTrayBag              Int?      @map("quantity_per_tray_bag")
+  totalOrderBalance               Int?      @map("total_order_balance")
+
+  // Pricing
+  weekCodeStart                   String?   @map("week_code_start")
+  pricePerUnit                    Float?    @map("price_per_unit")
+  sublotPriceExpectedNonShipped   Float?    @map("sublot_price_expected_non_shipped")
+  sublotPriceYieldNonShipped      Float?    @map("sublot_price_yield_non_shipped")
+  weekCodeYield                   String?   @map("week_code_yield")
+  expectedYieldPriceDiff          Float?    @map("expected_yield_price_diff")
+  shippedPricePerUnit             Float?    @map("shipped_price_per_unit")
+  sublotPriceExpected             Float?    @map("sublot_price_expected")
+  sublotPriceYield                Float?    @map("sublot_price_yield")
+  orderBalanceValue               Float?    @map("order_balance_value")
+  quarantineReleaseRequired       Boolean?  @map("quarantine_release_required")
+
+  createdAt                       DateTime  @default(now())
+  updatedAt                       DateTime  @updatedAt
+
+  @@map("order_records")
+}
+
+model ShippingLog {
+  id                          Int       @id @default(autoincrement())
+  status                      String?
+  customer                    String?
+  agreementPONumber           String?   @map("agreement_po_number")
+  lotNumber                   String?   @map("lot_number")
+  shipperNumber               String?   @map("shipper_number")
+  productDescription          String?   @map("product_description")
+  partNumber                  String?   @map("part_number")
+  fgNumber                    String?   @map("fg_number")
+  quantityPerTrayBag          Int?      @map("quantity_per_tray_bag")
+  quarantineShipment          Boolean?  @map("quarantine_shipment")
+  forecastedAmount            Int?      @map("forecasted_amount")
+  totalOrderYield             Int?      @map("total_order_yield")
+  shippedSoFar                Int?      @map("shipped_so_far")
+  orderBalance                Int?      @map("order_balance")
+  shipDate                    DateTime? @map("ship_date")
+  shipQuantity                Int?      @map("ship_quantity")
+  weekCodeShipped             String?   @map("week_code_shipped")
+  pricePerUnit                Float?    @map("price_per_unit")
+  sublotPriceYield            Float?    @map("sublot_price_yield")
+  sublotPriceShipped          Float?    @map("sublot_price_shipped")
+  yieldShippedPriceDiff       Float?    @map("yield_shipped_price_diff")
+  sublotPriceForecasted       Float?    @map("sublot_price_forecasted")
+  shippedSoFarValue           Float?    @map("shipped_so_far_value")
+  forecastedShippedPriceDiff  Float?    @map("forecasted_shipped_price_diff")
+  partialShipment             Boolean?  @map("partial_shipment")
+  createdAt                   DateTime  @default(now())
+  updatedAt                   DateTime  @updatedAt
+
+  @@map("shipping_logs")
+}
+
+model NCRRecord {
+  id                    Int       @id @default(autoincrement())
+  customer              String?
+  lotNumber             String?   @map("lot_number")
+  ncrLotNumber          String?   @map("ncr_lot_number")
+  productDescription    String?   @map("product_description")
+  partNumber            String?   @map("part_number")
+  comments              String?
+  ncrCreatedDate        DateTime? @map("ncr_created_date")
+  washStartDate         DateTime? @map("wash_start_date")
+  boxedDate             DateTime? @map("boxed_date")
+  reconciledDate        DateTime? @map("reconciled_date")
+  reviewedDate          DateTime? @map("reviewed_date")
+  totalOrderYield       Int?      @map("total_order_yield")
+  certRequestSentDate   DateTime? @map("cert_request_sent_date")
+  certifiedDate         DateTime? @map("certified_date")
+  shipDate              DateTime? @map("ship_date")
+  shipQuantity          Int?      @map("ship_quantity")
+  totalOrderBalance     Int?      @map("total_order_balance")
+  createdAt             DateTime  @default(now())
+  updatedAt             DateTime  @updatedAt
+
+  @@map("ncr_records")
+}
+
+model QuarantineRecord {
+  id                    Int       @id @default(autoincrement())
+  customer              String?
+  releaseNumber         String?   @map("release_number")
+  lotNumber             String?   @map("lot_number")
+  productDescription    String?   @map("product_description")
+  cleaningStartDate     DateTime? @map("cleaning_start_date")
+  quarantineReleaseDate DateTime? @map("quarantine_release_date")
+  quarantineReleased    Boolean?  @default(false) @map("quarantine_released")
+  notes                 String?
+  createdAt             DateTime  @default(now())
+  updatedAt             DateTime  @updatedAt
+
+  @@map("quarantine_records")
+}
